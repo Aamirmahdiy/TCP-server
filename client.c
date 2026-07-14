@@ -99,7 +99,6 @@ int main(void)
 
     client_fd = create_connected_socket();
 
-    /* Communication loop: send message, wait for server reply, repeat until exit. */
     while (1) {
         read_user_message(message, sizeof(message));
         send_message(client_fd, message);

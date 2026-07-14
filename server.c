@@ -151,12 +151,7 @@ static void disconnect_client_by_id(int client_id)
     pthread_mutex_unlock(&registry_mutex);
 }
 
-/*
- * Parse server commands such as:
- *   to client1: hi
- *   to client 1: hi
- *   toclient2:exit
- */
+
 static int parse_command(const char *line, int *client_id, char *message, size_t msg_size)
 {
     char line_copy[BUFFER_SIZE];
@@ -250,7 +245,6 @@ static int create_listening_socket(void)
     return server_fd;
 }
 
-/* Receive-only thread: display incoming messages without blocking other clients. */
 static void *client_thread(void *arg)
 {
     client_context_t *ctx = (client_context_t *)arg;
@@ -293,7 +287,6 @@ static void *client_thread(void *arg)
     return NULL;
 }
 
-/* Command thread: server operator chooses which client to reply to. */
 static void *command_thread(void *arg)
 {
     char line[BUFFER_SIZE];
