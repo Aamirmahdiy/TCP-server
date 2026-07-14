@@ -4,10 +4,20 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <pthread.h>
 
 #define SERVER_PORT 8080
 #define BUFFER_SIZE 1024
 #define EXIT_CMD    "exit"
+
+static pthread_mutex_t io_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int next_client_id = 1;
+static pthread_mutex_t id_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+typedef struct {
+    int client_fd;
+    int client_id;
+} client_context_t;
 
 static void strip_newline(char *buf)
 {
@@ -39,24 +49,46 @@ static ssize_t recv_message(int fd, char *buf, size_t size)
     return bytes_received;
 }
 
-static void send_message(int fd, const char *msg)
+static int send_message(int fd, const char *msg)
 {
     if (send(fd, msg, strlen(msg), 0) == -1) {
         perror("send");
-        exit(EXIT_FAILURE);
+        return -1;
     }
+    return 0;
 }
 
-static void read_line(const char *prompt, char *buf, size_t size)
+static int assign_client_id(void)
 {
+    int id;
+
+    pthread_mutex_lock(&id_mutex);
+    id = next_client_id++;
+    pthread_mutex_unlock(&id_mutex);
+    return id;
+}
+
+static void print_client_message(int client_id, const char *msg)
+{
+    pthread_mutex_lock(&io_mutex);
+    printf("\n[Client %d]\n%s\n", client_id, msg);
+    pthread_mutex_unlock(&io_mutex);
+}
+
+static int read_line_safe(const char *prompt, char *buf, size_t size)
+{
+    pthread_mutex_lock(&io_mutex);
     printf("%s", prompt);
 
     if (fgets(buf, (int)size, stdin) == NULL) {
+        pthread_mutex_unlock(&io_mutex);
         fprintf(stderr, "Failed to read input.\n");
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     strip_newline(buf);
+    pthread_mutex_unlock(&io_mutex);
+    return 0;
 }
 
 static int create_listening_socket(void)
@@ -90,38 +122,44 @@ static int create_listening_socket(void)
     return server_fd;
 }
 
-static void handle_client(int client_fd)
+static void *client_thread(void *arg)
 {
+    client_context_t *ctx = (client_context_t *)arg;
     char client_msg[BUFFER_SIZE];
     char reply[BUFFER_SIZE];
     ssize_t bytes_received;
 
-    /* Communication loop: receive client message, prompt server user for reply. */
+    /* Thread lifecycle: receive messages, prompt for replies, exit on disconnect/exit. */
     while (1) {
-        bytes_received = recv_message(client_fd, client_msg, sizeof(client_msg));
+        bytes_received = recv_message(ctx->client_fd, client_msg, sizeof(client_msg));
         if (bytes_received <= 0) {
-            if (bytes_received == 0) {
-                fprintf(stderr, "Client disconnected.\n");
-            }
             break;
         }
 
-        printf("\nClient:\n%s\n", client_msg);
+        print_client_message(ctx->client_id, client_msg);
 
         if (is_exit_message(client_msg)) {
             break;
         }
 
-        read_line("Reply:\n", reply, sizeof(reply));
-        send_message(client_fd, reply);
-
+        if (read_line_safe("Reply:\n", reply, sizeof(reply)) == -1) {
+            break;
+        }
+        if (send_message(ctx->client_fd, reply) == -1) {
+            break;
+        }
         if (is_exit_message(reply)) {
             break;
         }
     }
 
-    close(client_fd);
-    printf("\nConnection closed.\n");
+    close(ctx->client_fd);
+    pthread_mutex_lock(&io_mutex);
+    printf("\n[Client %d] Connection closed.\n", ctx->client_id);
+    pthread_mutex_unlock(&io_mutex);
+
+    free(ctx);
+    return NULL;
 }
 
 int main(void)
@@ -130,6 +168,8 @@ int main(void)
     int client_fd;
     struct sockaddr_in client_addr;
     socklen_t client_addr_len;
+    client_context_t *ctx;
+    pthread_t tid;
 
     printf("Server started...\n");
     printf("Listening on port %d...\n", SERVER_PORT);
@@ -142,15 +182,29 @@ int main(void)
         client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
         if (client_fd == -1) {
             perror("accept");
-            close(server_fd);
-            exit(EXIT_FAILURE);
+            continue;
         }
 
-        printf("\nClient connected.\n");
+        ctx = malloc(sizeof(client_context_t));
+        if (ctx == NULL) {
+            perror("malloc");
+            close(client_fd);
+            continue;
+        }
 
-        handle_client(client_fd);
+        ctx->client_fd = client_fd;
+        ctx->client_id = assign_client_id();
 
-        printf("\nWaiting for another client...\n");
+        printf("\nClient #%d connected.\n", ctx->client_id);
+
+        if (pthread_create(&tid, NULL, client_thread, ctx) != 0) {
+            perror("pthread_create");
+            close(client_fd);
+            free(ctx);
+            continue;
+        }
+
+        pthread_detach(tid);
     }
 
     close(server_fd);
