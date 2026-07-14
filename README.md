@@ -1,8 +1,6 @@
-# TCP Client-Server Chat (Phase 2)
+# TCP Client-Server Chat (Phase 3)
 
-An interactive TCP chat application written in C using the POSIX socket API. The client and server exchange multiple messages over a persistent connection until one side types `exit`.
-
-Built on top of Phase 1 — same TCP fundamentals, now with a turn-based chat loop.
+A multi-client TCP chat application written in C using the POSIX socket API and POSIX threads. Multiple clients can connect simultaneously; the server receives all messages and lets the operator choose which client to reply to using simple commands.
 
 ---
 
@@ -15,13 +13,15 @@ Built on top of Phase 1 — same TCP fundamentals, now with a turn-based chat lo
 - [Requirements](#requirements)
 - [Building](#building)
 - [Running a Chat Session](#running-a-chat-session)
+- [Server Commands](#server-commands)
 - [Example Session](#example-session)
 - [How It Works](#how-it-works)
 - [Code Walkthrough](#code-walkthrough)
 - [Configuration](#configuration)
 - [Error Handling](#error-handling)
-- [Limitations (Phase 2)](#limitations-phase-2)
+- [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
+- [Project Phases](#project-phases)
 - [Learning Objectives](#learning-objectives)
 
 ---
@@ -61,7 +61,7 @@ make clean && make
 ./server
 ```
 
-**Start the client (Terminal 2 — open a second WSL terminal):**
+**Start a client (Terminal 2, 3, 4… — one client per terminal):**
 
 ```bash
 wsl
@@ -69,11 +69,7 @@ cd /mnt/e/coding/tcpserver
 ./client
 ```
 
-**Start server in background (optional):**
-
-```bash
-./server &
-```
+You can run **multiple clients at the same time** in separate terminals.
 
 ---
 
@@ -81,25 +77,52 @@ cd /mnt/e/coding/tcpserver
 
 | Action | Where | What to type |
 |--------|-------|--------------|
-| Send a message | Client terminal | Type your message at `Enter a message:` |
-| Reply to client | Server terminal | Type your reply at `Reply:` |
-| End the session | Either terminal | Type `exit` |
+| Send a message | Client terminal | Type at `Enter a message:` |
+| Reply to a specific client | Server terminal | `to client1: hi` |
+| Close a specific client | Server terminal | `toclient2:exit` |
+| End from client side | Client terminal | `exit` |
 
-The client always sends first in each round. The server types each reply manually — responses are not auto-generated.
+**Client numbers** are assigned in connect order: first client is `#1`, second is `#2`, etc.
+
+---
+
+### Server reply commands
+
+```text
+to client1: hi
+to client 2: Hello there!
+toclient2:exit
+```
+
+All of these formats work:
+
+| Format | Example |
+|--------|---------|
+| `to client<N>: <message>` | `to client1: hi` |
+| `to client <N>: <message>` | `to client 1: hi` |
+| `toclient<N>:<message>` | `toclient2:exit` |
+
+Sending `exit` (case-insensitive) closes that client's connection.
 
 ---
 
 ### Ending commands
 
-**End the chat (recommended):**
+**Close one client from the server:**
 
-Type `exit` in either the client or server terminal. The connection closes and both sides print `Connection closed.`
+```text
+toclient1:exit
+```
 
-**Stop the server manually (Ctrl+C in server terminal):**
+**Close from the client side:**
+
+Type `exit` at `Enter a message:` in the client terminal.
+
+**Stop the server (Ctrl+C in server terminal):**
 
 Press `Ctrl + C` in the terminal where `./server` is running.
 
-**Kill server and client processes:**
+**Kill all server and client processes:**
 
 ```bash
 pkill -f "./server"
@@ -146,12 +169,20 @@ make
 # 3. Terminal 1 — start server
 ./server
 
-# 4. Terminal 2 — start client
+# 4. Terminal 2 — start client 1
 ./client
 
-# 5. Chat back and forth, then type exit on either side
+# 5. Terminal 3 — start client 2 (optional)
+./client
 
-# 6. To stop everything afterward
+# 6. Clients send messages; server replies with:
+#    to client1: hi
+#    to client2: hello
+
+# 7. Close a client from server:
+#    toclient1:exit
+
+# 8. Stop everything afterward
 pkill -f "./server"
 pkill -f "./client"
 ```
@@ -162,24 +193,25 @@ pkill -f "./client"
 
 This project consists of two separate programs:
 
-| Program    | Role   | Description                                              |
-|------------|--------|----------------------------------------------------------|
-| `server.c` | Server | Listens on port 8080, receives messages, types replies   |
-| `client.c` | Client | Connects to the server, sends messages, displays replies |
+| Program    | Role   | Description                                                       |
+|------------|--------|-------------------------------------------------------------------|
+| `server.c` | Server | Listens on port 8080, handles multiple clients with threads       |
+| `client.c` | Client | Connects to the server, sends messages, displays replies          |
 
-Communication uses **IPv4**, **TCP** (`SOCK_STREAM`), and **localhost** (`127.0.0.1:8080`).
+Communication uses **IPv4**, **TCP** (`SOCK_STREAM`), **POSIX threads** (`pthread`), and **localhost** (`127.0.0.1:8080`).
 
 ---
 
 ## Features
 
-- Persistent TCP connection for multiple message exchanges
-- Interactive turn-based chat (client sends, server replies)
-- Server user types every reply through the terminal
-- Graceful shutdown with the `exit` command
-- Server accepts new clients after a session ends (no restart needed)
+- **Multi-client support** — multiple clients connect simultaneously
+- **Thread-per-client** — each client gets its own dedicated thread
+- **Non-blocking message display** — all client messages appear immediately; no need to reply before seeing the next message
+- **Choose who to reply to** — server operator sends targeted replies with `to client<N>: <message>`
+- **Persistent TCP connections** — clients stay connected for multiple message exchanges
+- **Graceful shutdown** — `exit` from client or `toclient<N>:exit` from server
+- **Client registry** — tracks active connections by client ID
 - Error checking on every system call with `perror()`
-- Clean helper-function structure with no global variables
 
 ---
 
@@ -187,9 +219,9 @@ Communication uses **IPv4**, **TCP** (`SOCK_STREAM`), and **localhost** (`127.0.
 
 ```
 tcpserver/
-├── server.c      # TCP server — accept loop + chat handler
+├── server.c      # Multi-client TCP server with pthread + command dispatch
 ├── client.c      # TCP client — connect + chat loop
-├── Makefile      # Build rules (gcc, -Wall -Wextra)
+├── Makefile      # Build rules (gcc, -Wall -Wextra, -pthread)
 └── README.md     # This file
 ```
 
@@ -197,7 +229,7 @@ After building:
 
 ```
 server    # Run in Terminal 1
-client    # Run in Terminal 2
+client    # Run in one or more additional terminals
 ```
 
 ---
@@ -206,7 +238,7 @@ client    # Run in Terminal 2
 
 ### Platform
 
-POSIX socket APIs (`<sys/socket.h>`, `<arpa/inet.h>`, `<unistd.h>`). Run on:
+POSIX socket APIs and POSIX threads. Run on:
 
 - **Linux** (native)
 - **WSL** (Windows Subsystem for Linux) — recommended on Windows
@@ -216,10 +248,11 @@ Native Windows compilers (e.g. MinGW) are **not** supported.
 
 ### Toolchain
 
-| Tool   | Purpose          |
-|--------|------------------|
-| `gcc`  | C compiler       |
-| `make` | Build automation |
+| Tool     | Purpose              |
+|----------|----------------------|
+| `gcc`    | C compiler           |
+| `make`   | Build automation     |
+| `pthread`| POSIX threads (linked with `-pthread`) |
 
 Install on Ubuntu/Debian (WSL):
 
@@ -239,7 +272,7 @@ make
 Individual targets:
 
 ```bash
-make server    # Build only the server
+make server    # Build only the server (links with -pthread)
 make client    # Build only the client
 make clean     # Remove compiled binaries
 ```
@@ -247,7 +280,7 @@ make clean     # Remove compiled binaries
 Manual compilation:
 
 ```bash
-gcc -Wall -Wextra -o server server.c
+gcc -Wall -Wextra -pthread -o server server.c
 gcc -Wall -Wextra -o client client.c
 ```
 
@@ -255,7 +288,7 @@ gcc -Wall -Wextra -o client client.c
 
 ## Running a Chat Session
 
-You need **two terminals**. Start the server first.
+You need **at least two terminals** — one for the server, one or more for clients.
 
 ### Terminal 1 — Server
 
@@ -270,11 +303,11 @@ Expected output:
 ```
 Server started...
 Listening on port 8080...
+Commands: to client<N>: <message>
+Examples: to client1: hi   |   toclient2:exit
 ```
 
-The server blocks on `accept()` until a client connects.
-
-### Terminal 2 — Client
+### Terminal 2 (and 3, 4…) — Clients
 
 ```bash
 wsl
@@ -282,16 +315,50 @@ cd /mnt/e/coding/tcpserver
 ./client
 ```
 
-Type messages when prompted. The connection stays open for multiple exchanges.
+Each client connects independently. Type messages when prompted.
 
-### Ending the session
+---
 
-Type `exit` on either side:
+## Server Commands
 
-- **Client types `exit`** — sends it, closes immediately, no reply expected
-- **Server types `exit`** at the `Reply:` prompt — sends it to the client, both close
+The server operator types commands in the **server terminal** to send messages to specific clients.
 
-After a session ends, the server prints `Waiting for another client...` and accepts the next connection without restarting.
+### Syntax
+
+```text
+to client<N>: <message>
+```
+
+### Examples
+
+| Command | Effect |
+|---------|--------|
+| `to client1: hi` | Sends `hi` to Client 1 |
+| `to client 2: Hello!` | Sends `Hello!` to Client 2 |
+| `toclient1:exit` | Sends `exit` to Client 1 and closes that connection |
+| `to client3: See you later` | Sends message to Client 3 |
+
+### How messages appear
+
+When any client sends a message, it shows up immediately on the server:
+
+```text
+[Client 1]
+Hello
+
+[Client 2]
+Hi
+```
+
+You can reply to Client 2 first even if Client 1 sent a message earlier:
+
+```text
+to client2: Welcome!
+Sent to [Client 2]: Welcome!
+
+to client1: Hi there!
+Sent to [Client 1]: Hi there!
+```
 
 ---
 
@@ -304,30 +371,36 @@ $ ./server
 
 Server started...
 Listening on port 8080...
+Commands: to client<N>: <message>
+Examples: to client1: hi   |   toclient2:exit
 
-Client connected.
+Client #1 connected.
 
-Client:
+Client #2 connected.
+
+[Client 1]
 Hello
 
-Reply:
-Hi! Welcome.
+[Client 2]
+Hi
 
-Client:
-How are you?
+to client2: Welcome!
+Sent to [Client 2]: Welcome!
 
-Reply:
-I'm good!
+to client1: Hi there!
+Sent to [Client 1]: Hi there!
 
-Client:
+toclient2:exit
+Sent to [Client 2]: exit
+[Client 2] Connection closed.
+
+[Client 1]
 exit
 
-Connection closed.
-
-Waiting for another client...
+[Client 1] Connection closed.
 ```
 
-### Terminal 2 (Client)
+### Terminal 2 (Client 1)
 
 ```
 $ ./client
@@ -336,13 +409,26 @@ Enter a message:
 Hello
 
 Server:
-Hi! Welcome.
+Hi there!
 Enter a message:
-How are you?
+exit
+
+Connection closed.
+```
+
+### Terminal 3 (Client 2)
+
+```
+$ ./client
+
+Enter a message:
+Hi
 
 Server:
-I'm good!
+Welcome!
 Enter a message:
+
+Server:
 exit
 
 Connection closed.
@@ -352,54 +438,45 @@ Connection closed.
 
 ## How It Works
 
+### Architecture
+
+```
+  MAIN THREAD              CLIENT THREADS           COMMAND THREAD
+       |                        |                         |
+  accept() loop            recv + display              read stdin
+       |                        |                         |
+  spawn thread ──────────> [Client 1 thread]             |
+  spawn thread ──────────> [Client 2 thread]      parse "to clientN: msg"
+  spawn thread ──────────> [Client 3 thread]      send to client N's socket
+```
+
+- **Main thread** — accepts new connections and spawns a thread for each client
+- **Client threads** — receive messages and display them; never block on replies
+- **Command thread** — reads server operator commands and sends replies to the chosen client
+
 ### Conversation flow
 
 ```
-  CLIENT                          SERVER
-    |                                |
-    |         TCP connect            |
-    |------------------------------->|
-    |                                | accept()
-    |                                |
-    |  +-------- chat loop --------+  |
-    |  | send(message)             |  |
-    |  |-------------------------->|  | recv() + print "Client:"
-    |  |                           |  | read reply from stdin
-    |  | recv() + print "Server:"  |  |
-    |  |<--------------------------|  | send(reply)
-    |  +-------- until exit ------+  |
-    |                                |
-    |         close()                |
-    |------------------------------->|
-    |                                | close(client_fd)
-    |                                | loop → accept() again
+  CLIENT 1          CLIENT 2              SERVER
+     |                 |                     |
+     |--- connect ---->|                     | accept → thread 1
+     |                 |--- connect --------->| accept → thread 2
+     |                 |                     |
+     |--- "Hello" ---->|-------------------->| [Client 1] Hello
+     |                 |--- "Hi" ----------->| [Client 2] Hi
+     |                 |                     |
+     |                 |    operator types: to client2: Welcome!
+     |                 |<--------------------|
+     |                 |                     |
+     |    operator types: to client1: Hi there!
+     |<-------------------------------------|
 ```
 
-### Server lifecycle
+### Client lifecycle (unchanged from Phase 2)
 
-1. **`socket()` / `bind()` / `listen()`** — Set up listening socket on port 8080
-2. **`accept()`** — Wait for a client connection
-3. **Chat loop:**
-   - **`recv()`** — Read client message
-   - Print `Client:` + message
-   - If message is `exit`, break
-   - Prompt `Reply:` and read from stdin
-   - **`send()`** — Send reply to client
-   - If reply is `exit`, break
-4. **`close()`** — Close client socket
-5. Return to step 2 for the next client
-
-### Client lifecycle
-
-1. **`socket()` / `connect()`** — Connect to `127.0.0.1:8080`
-2. **Chat loop:**
-   - Prompt user, read message from stdin
-   - **`send()`** — Send message to server
-   - If message is `exit`, break
-   - **`recv()`** — Read server reply
-   - Print `Server:` + reply
-   - If reply is `exit`, break
-3. **`close()`** — Close connection and exit
+1. **`connect()`** to `127.0.0.1:8080`
+2. **Chat loop:** send message → wait for reply → repeat
+3. Type `exit` to disconnect
 
 ---
 
@@ -407,45 +484,45 @@ Connection closed.
 
 ### `server.c`
 
-| Function                    | Responsibility                                           |
-|-----------------------------|----------------------------------------------------------|
-| `create_listening_socket()` | Creates socket, binds to port 8080, calls `listen()`     |
-| `handle_client()`           | Chat loop: recv → display → prompt reply → send          |
-| `recv_message()`            | Wrapper around `recv()` with null-termination            |
-| `send_message()`            | Wrapper around `send()` with error checking              |
-| `read_line()`               | Reads a line from stdin with a custom prompt             |
-| `is_exit_message()`         | Checks if a message equals `"exit"`                      |
-| `main()`                    | Startup messages, infinite accept loop                   |
+| Function / Thread | Responsibility |
+|-------------------|----------------|
+| `main()` | Accept loop, spawns client threads and command thread |
+| `client_thread()` | Receive-only loop: recv → display `[Client N]` message |
+| `command_thread()` | Read stdin commands → parse → send to target client |
+| `parse_command()` | Parses `to client1: hi` and `toclient2:exit` formats |
+| `send_to_client()` | Looks up client by ID in registry, sends message |
+| `register_client()` | Adds client to active registry |
+| `disconnect_client_by_id()` | Closes socket and marks client inactive |
+| `create_listening_socket()` | Socket setup: bind port 8080, listen |
 
 ### `client.c`
 
-| Function                    | Responsibility                                           |
-|-----------------------------|----------------------------------------------------------|
-| `create_connected_socket()` | Creates socket and connects to the server                |
-| `read_user_message()`       | Prompts user, reads stdin, strips trailing newline       |
-| `recv_message()`            | Wrapper around `recv()` with null-termination            |
-| `send_message()`            | Wrapper around `send()` with error checking              |
-| `is_exit_message()`         | Checks if a message equals `"exit"`                      |
-| `main()`                    | Connect, chat loop, close                                |
+| Function | Responsibility |
+|----------|----------------|
+| `create_connected_socket()` | Creates socket and connects to the server |
+| `read_user_message()` | Prompts user, reads stdin, strips trailing newline |
+| `main()` | Connect, chat loop, close |
 
-Key constants (both files):
+Key constants:
 
 ```c
 #define SERVER_PORT 8080
 #define BUFFER_SIZE 1024
 #define EXIT_CMD    "exit"
+#define MAX_CLIENTS 32        /* server.c only */
 ```
 
 ---
 
 ## Configuration
 
-| Constant      | Value       | File       | Description                |
-|---------------|-------------|------------|----------------------------|
-| `SERVER_PORT` | `8080`      | Both       | TCP port number            |
-| `SERVER_IP`   | `127.0.0.1` | `client.c` | Server address (localhost) |
-| `BUFFER_SIZE` | `1024`      | Both       | Max message size (bytes)   |
-| `EXIT_CMD`    | `"exit"`    | Both       | Command to end the session |
+| Constant      | Value       | File       | Description                    |
+|-----------------|-------------|------------|--------------------------------|
+| `SERVER_PORT`   | `8080`      | Both       | TCP port number                |
+| `SERVER_IP`     | `127.0.0.1` | `client.c` | Server address (localhost)     |
+| `BUFFER_SIZE`   | `1024`      | Both       | Max message size (bytes)       |
+| `EXIT_CMD`      | `"exit"`    | Both       | Command to end a session       |
+| `MAX_CLIENTS`   | `32`        | `server.c` | Max simultaneous connections   |
 
 To change the port, update `SERVER_PORT` in **both** files, then run `make clean && make`.
 
@@ -457,26 +534,28 @@ Every system call return value is checked. On failure:
 
 1. Prints a descriptive message via `perror()`
 2. Closes open file descriptors
-3. Exits gracefully (client) or returns to the accept loop (server)
+3. Exits gracefully (client) or continues serving other clients (server)
 
-| Situation                    | Behavior                                              |
-|------------------------------|-------------------------------------------------------|
-| `recv()` returns `0`         | Peer disconnected; print message and close            |
-| `recv()` returns `-1`        | Print error; server returns to accept loop            |
-| Client sends `exit`          | Server displays it, closes without prompting a reply  |
-| Server sends `exit` as reply | Client displays it and closes                         |
-| `bind()` fails (port in use) | See [Troubleshooting](#troubleshooting)               |
+| Situation | Behavior |
+|-----------|----------|
+| `recv()` returns `0` | Peer disconnected; thread closes that client |
+| Client sends `exit` | Thread displays message and closes connection |
+| Server sends `toclient<N>:exit` | Client receives `exit` and closes |
+| Unknown server command | Prints usage hint, continues |
+| Client ID not connected | Prints error, continues |
+| `pthread_create` fails | Closes socket, continues accept loop |
+| `bind()` fails (port in use) | See [Troubleshooting](#troubleshooting) |
 
 ---
 
-## Limitations (Phase 2)
+## Limitations
 
 Intentionally out of scope:
 
-- Multithreading or concurrent clients
-- Multiple simultaneous connections
+- Chat rooms or broadcasting to all clients
 - Authentication or encryption (TLS/SSL)
 - File transfer or message history
+- Thread pool (uses thread-per-client instead)
 - Command-line argument parsing
 - Configuration files
 
@@ -505,9 +584,17 @@ Make sure there is a **space** between `-k` and `8080` in the `fuser` command.
 - Start `./server` in Terminal 1 before running `./client`
 - Verify port 8080 is not blocked by a firewall
 
-### Server starts but immediately shows `bind: Address already in use`
+### Server shows startup messages then `bind: Address already in use`
 
 The startup messages print **before** `bind()` is called. If bind fails, the server exits even though you saw "Listening on port 8080...". Free the port with the commands above.
+
+### `Client N is not connected`
+
+The client has already disconnected or the client number is wrong. Client numbers are assigned in connect order and never reused during a server session.
+
+### `Unknown command. Use: to client<N>: <message>`
+
+Check the command format. Valid examples: `to client1: hi`, `to client 2: hello`, `toclient1:exit`.
 
 ### `make: command not found` or `gcc: command not found`
 
@@ -532,18 +619,29 @@ Messages longer than 1023 characters are truncated by a single `recv()` call. In
 
 ---
 
+## Project Phases
+
+| Phase | Feature |
+|-------|---------|
+| **Phase 1** | Basic TCP — one message per connection, auto-confirmation reply |
+| **Phase 2** | Persistent chat — multiple messages, interactive server replies, `exit` command |
+| **Phase 3** | Multi-client — POSIX threads, simultaneous clients, command-based replies (`to client<N>:`) |
+
+---
+
 ## Learning Objectives
 
 After working through this project, you should understand:
 
-- Persistent TCP connections vs. one-shot exchanges
-- Turn-based client-server communication using loops
-- Interactive terminal input on both client and server sides
-- Graceful connection shutdown with an application-level `exit` command
-- The TCP connection lifecycle: connect → exchange data → close
+- Multi-client TCP server architecture
+- Concurrent programming with POSIX threads (`pthread`)
+- Thread-per-client design pattern
+- Separating receive and send responsibilities across threads
+- Concurrent socket communication without blocking other clients
+- Proper thread cleanup and connection lifecycle management
+- Persistent TCP connections and graceful shutdown
 - Socket creation, binding, listening, accepting, connecting
 - Sending and receiving data with `send()` and `recv()`
-- `struct sockaddr_in` and address conversion (`htons`, `inet_pton`)
 - Error handling with `perror()` in systems programming
 
 ---
