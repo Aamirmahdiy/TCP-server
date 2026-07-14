@@ -559,7 +559,7 @@ Intentionally out of scope:
 - Command-line argument parsing
 - Configuration files
 
-These may be added in future phases.
+These features are planned for future phases — see [Project Phases](#project-phases).
 
 ---
 
@@ -621,11 +621,36 @@ Messages longer than 1023 characters are truncated by a single `recv()` call. In
 
 ## Project Phases
 
+This project is built incrementally. Each phase adds new functionality on top of the previous one.
+
+### Completed
+
 | Phase | Feature |
 |-------|---------|
 | **Phase 1** | Basic TCP — one message per connection, auto-confirmation reply |
 | **Phase 2** | Persistent chat — multiple messages, interactive server replies, `exit` command |
 | **Phase 3** | Multi-client — POSIX threads, simultaneous clients, command-based replies (`to client<N>:`) |
+
+### Planned
+
+| Phase | Feature | Description |
+|-------|---------|-------------|
+| **Phase 4** | Login system | User authentication — clients must log in with a username and password before chatting |
+| **Phase 5** | Chat rooms | Shared chat rooms where multiple users can join and exchange messages in the same space |
+| **Phase 6** | File messages | Send and receive files over TCP, not just text |
+| **Phase 7** | Direct messages | Private one-to-one messaging between specific users |
+
+### Roadmap overview
+
+```
+Phase 1  →  Basic TCP connection
+Phase 2  →  Persistent interactive chat
+Phase 3  →  Multiple simultaneous clients (current)
+Phase 4  →  Login and authentication
+Phase 5  →  Chat rooms
+Phase 6  →  File transfer
+Phase 7  →  Direct (private) messages
+```
 
 ---
 
