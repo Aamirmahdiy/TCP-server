@@ -7,7 +7,57 @@
 
 #define SERVER_PORT 8080
 #define BUFFER_SIZE 1024
-#define CONFIRMATION_MSG "Server received your message successfully.\n"
+#define EXIT_CMD    "exit"
+
+static void strip_newline(char *buf)
+{
+    size_t len = strlen(buf);
+    if (len > 0 && buf[len - 1] == '\n') {
+        buf[len - 1] = '\0';
+    }
+}
+
+static int is_exit_message(const char *msg)
+{
+    return strcmp(msg, EXIT_CMD) == 0;
+}
+
+static ssize_t recv_message(int fd, char *buf, size_t size)
+{
+    ssize_t bytes_received;
+
+    bytes_received = recv(fd, buf, size - 1, 0);
+    if (bytes_received == -1) {
+        perror("recv");
+        return -1;
+    }
+    if (bytes_received == 0) {
+        return 0;
+    }
+
+    buf[bytes_received] = '\0';
+    return bytes_received;
+}
+
+static void send_message(int fd, const char *msg)
+{
+    if (send(fd, msg, strlen(msg), 0) == -1) {
+        perror("send");
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void read_line(const char *prompt, char *buf, size_t size)
+{
+    printf("%s", prompt);
+
+    if (fgets(buf, (int)size, stdin) == NULL) {
+        fprintf(stderr, "Failed to read input.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    strip_newline(buf);
+}
 
 static int create_listening_socket(void)
 {
@@ -42,36 +92,36 @@ static int create_listening_socket(void)
 
 static void handle_client(int client_fd)
 {
-    char buffer[BUFFER_SIZE];
+    char client_msg[BUFFER_SIZE];
+    char reply[BUFFER_SIZE];
     ssize_t bytes_received;
-    ssize_t bytes_sent;
 
-    bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_received == -1) {
-        perror("recv");
-        close(client_fd);
-        exit(EXIT_FAILURE);
-    }
-    if (bytes_received == 0) {
-        fprintf(stderr, "Client disconnected before sending a message.\n");
-        close(client_fd);
-        return;
-    }
+    /* Communication loop: receive client message, prompt server user for reply. */
+    while (1) {
+        bytes_received = recv_message(client_fd, client_msg, sizeof(client_msg));
+        if (bytes_received <= 0) {
+            if (bytes_received == 0) {
+                fprintf(stderr, "Client disconnected.\n");
+            }
+            break;
+        }
 
-    buffer[bytes_received] = '\0';
+        printf("\nClient:\n%s\n", client_msg);
 
-    printf("\nReceived:\n%s\n", buffer);
+        if (is_exit_message(client_msg)) {
+            break;
+        }
 
-    printf("Sending confirmation...\n");
+        read_line("Reply:\n", reply, sizeof(reply));
+        send_message(client_fd, reply);
 
-    bytes_sent = send(client_fd, CONFIRMATION_MSG, strlen(CONFIRMATION_MSG), 0);
-    if (bytes_sent == -1) {
-        perror("send");
-        close(client_fd);
-        exit(EXIT_FAILURE);
+        if (is_exit_message(reply)) {
+            break;
+        }
     }
 
     close(client_fd);
+    printf("\nConnection closed.\n");
 }
 
 int main(void)

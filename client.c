@@ -8,6 +8,45 @@
 #define SERVER_PORT 8080
 #define SERVER_IP   "127.0.0.1"
 #define BUFFER_SIZE 1024
+#define EXIT_CMD    "exit"
+
+static void strip_newline(char *buf)
+{
+    size_t len = strlen(buf);
+    if (len > 0 && buf[len - 1] == '\n') {
+        buf[len - 1] = '\0';
+    }
+}
+
+static int is_exit_message(const char *msg)
+{
+    return strcmp(msg, EXIT_CMD) == 0;
+}
+
+static ssize_t recv_message(int fd, char *buf, size_t size)
+{
+    ssize_t bytes_received;
+
+    bytes_received = recv(fd, buf, size - 1, 0);
+    if (bytes_received == -1) {
+        perror("recv");
+        return -1;
+    }
+    if (bytes_received == 0) {
+        return 0;
+    }
+
+    buf[bytes_received] = '\0';
+    return bytes_received;
+}
+
+static void send_message(int fd, const char *msg)
+{
+    if (send(fd, msg, strlen(msg), 0) == -1) {
+        perror("send");
+        exit(EXIT_FAILURE);
+    }
+}
 
 static int create_connected_socket(void)
 {
@@ -48,11 +87,7 @@ static void read_user_message(char *buf, size_t size)
         exit(EXIT_FAILURE);
     }
 
-    /* Strip trailing newline before sending. */
-    size_t len = strlen(buf);
-    if (len > 0 && buf[len - 1] == '\n') {
-        buf[len - 1] = '\0';
-    }
+    strip_newline(buf);
 }
 
 int main(void)
@@ -60,36 +95,35 @@ int main(void)
     int client_fd;
     char message[BUFFER_SIZE];
     char response[BUFFER_SIZE];
-    ssize_t bytes_sent;
     ssize_t bytes_received;
 
     client_fd = create_connected_socket();
 
-    read_user_message(message, sizeof(message));
+    /* Communication loop: send message, wait for server reply, repeat until exit. */
+    while (1) {
+        read_user_message(message, sizeof(message));
+        send_message(client_fd, message);
 
-    bytes_sent = send(client_fd, message, strlen(message), 0);
-    if (bytes_sent == -1) {
-        perror("send");
-        close(client_fd);
-        exit(EXIT_FAILURE);
+        if (is_exit_message(message)) {
+            break;
+        }
+
+        bytes_received = recv_message(client_fd, response, sizeof(response));
+        if (bytes_received <= 0) {
+            if (bytes_received == 0) {
+                fprintf(stderr, "Server closed the connection.\n");
+            }
+            break;
+        }
+
+        printf("\nServer:\n%s\n", response);
+
+        if (is_exit_message(response)) {
+            break;
+        }
     }
-
-    bytes_received = recv(client_fd, response, sizeof(response) - 1, 0);
-    if (bytes_received == -1) {
-        perror("recv");
-        close(client_fd);
-        exit(EXIT_FAILURE);
-    }
-    if (bytes_received == 0) {
-        fprintf(stderr, "Server closed the connection unexpectedly.\n");
-        close(client_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    response[bytes_received] = '\0';
-
-    printf("\nServer replied:\n%s", response);
 
     close(client_fd);
+    printf("\nConnection closed.\n");
     return EXIT_SUCCESS;
 }
