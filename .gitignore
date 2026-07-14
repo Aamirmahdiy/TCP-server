@@ -1,0 +1,25 @@
+# Compiled binaries
+/server
+/client
+
+# Object files
+*.o
+*.obj
+
+# Debug / core dumps
+*.dSYM/
+core
+vgcore.*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test logs (if created locally)
+*.log
